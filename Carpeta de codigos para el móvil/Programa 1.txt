@@ -1,0 +1,145 @@
+#Importación de las bibliotecas
+import RPi.GPIO as GPIO
+import time
+
+#Pines para los servomotores
+servo_pin = 7
+servo_pin2 = 8
+#Pin para infrarrojo
+SinfraD = 11
+#Pines para sensores ultrasonicos
+#Sensor Izquierdo
+SechoI = 21
+StrigI = 19
+#Sensor Derecho
+SechoD = 18 
+StrigD = 16
+#Sensor Frontal
+StrigF =15
+SechoF =13
+
+GPIO.setmode(GPIO.BOARD)
+GPIO.setup(35, GPIO.OUT)#motor Avanza
+GPIO.setup(36, GPIO.OUT)#motor Retrocede
+GPIO.setup(37, GPIO.OUT)#motor Avanza
+GPIO.setup(38, GPIO.OUT)#motor Retrocede
+GPIO.setup(12, GPIO.OUT)#Alimetacion positiva para el sensor infrarrojo
+GPIO.setup(servo_pin, GPIO.OUT)
+GPIO.setup(SinfraD, GPIO.IN)
+GPIO.setup(SechoD, GPIO.IN)
+GPIO.setup(SechoI, GPIO.IN)
+GPIO.setup(StrigI, GPIO.OUT)
+GPIO.setup(StrigD, GPIO.OUT)
+GPIO.setup(SechoF, GPIO.IN)
+GPIO.setup(StrigF, GPIO.OUT)
+#Contador para infrarrojo
+contador = 0
+# Configuramos el servo
+servo = GPIO.PWM(servo_pin, 50)
+servo.start(7.5)  # Ángulo neutro
+# Configuramos velocidad de motores
+pin1 = GPIO.PWM(35, 100)
+pin2 = GPIO.PWM(36, 100)
+pin3 = GPIO.PWM(37, 100)
+pin4 = GPIO.PWM(38, 100)
+pin1.start(0)
+pin2.start(0)
+pin3.start(0)
+pin4.start(0)
+# Función para el auto
+def avanzar():
+    pin1.ChangeDutyCycle(80)
+    pin2.ChangeDutyCycle(0)
+    pin3.ChangeDutyCycle(80)
+    pin4.ChangeDutyCycle(0)
+
+def retroceder():
+    pin1.ChangeDutyCycle(0)
+    pin2.ChangeDutyCycle(80)
+    pin3.ChangeDutyCycle(0)
+    pin4.ChangeDutyCycle(80)
+    
+def izquierda():
+    servo.ChangeDutyCycle(9) 
+    time.sleep(0.1)
+        
+def derecha():
+    servo.ChangeDutyCycle(6)
+    time.sleep(0.1) 
+    
+def detener():
+    pin1.ChangeDutyCycle(0)
+    pin2.ChangeDutyCycle(0)
+    pin3.ChangeDutyCycle(0)
+    pin4.ChangeDutyCycle(0)
+#Función para detectar paredes
+def distancia(pin_trigger, pin_echo):
+    # Generamos un pulso en el pin trigger del sensor ultrasónico
+    GPIO.output(pin_trigger, GPIO.HIGH)
+    time.sleep(0.00001)
+    GPIO.output(pin_trigger, GPIO.LOW)
+    # Medimos el tiempo que tarda en llegar el eco del pulso al pin echo del sensor ultrasónico
+    while GPIO.input(pin_echo) == 0:
+        start_time = time.time()
+    while GPIO.input(pin_echo) == 1:
+        end_time = time.time()
+    # Calculamos la distancia en centímetros utilizando la fórmula de la velocidad del sonido
+    distance = (end_time - start_time) * 34300 / 2
+    return distance
+# Bucle principal del programa
+while True:
+    avanzar()
+    #Damos HIGH para la alimentacion del infrarrojo, aviso solo porque no teniamos alimentacion para el sensor.
+    GPIO.output(12, GPIO.HIGH)
+    # Si no detectamos una línea con el sensor infrarrojo, utilizamos los sensores ultrasónicos para mantenernos en el medio del camino entre dos paredes
+    # Medimos la distancia a la pared izquierda y derecha con los sensores ultrasónicos
+    distancia_izquierda = distancia(StrigI, SechoI)
+    distancia_derecha = distancia(StrigD, SechoD)
+    distancia_frontal = distancia(StrigF, SechoF)
+    # Si estamos demasiado cerca de la pared derecha, giramos a la derecha para alejarnos de ella        
+    if distancia_izquierda < 50:
+       derecha()
+    # Si estamos demasiado cerca de la pared derecha, giramos a la izquierda para alejarnos de ella
+    elif distancia_derecha < 50:
+        izquierda()
+    elif distancia_frontal < 20:
+        if distancia_izquierda > 120:
+            retroceder()
+            servo.ChangeDutyCycle(6)
+            time.sleep(1)
+            servo.ChangeDutyCycle(7)
+            detener()
+            time.sleep(1)
+            avanzar()
+            servo.ChangeDutyCycle(8)
+            time.sleep(1)
+        elif distancia_derecha > 120:
+            retroceder()
+            servo.ChangeDutyCycle(8.5)
+            time.sleep(1)
+            servo.ChangeDutyCycle(7.5)
+            detener()
+            time.sleep(1)
+            avanzar()
+            servo.ChangeDutyCycle(6)
+            time.sleep(1)
+        # Si estamos en el medio del camino entre las dos paredes, avanzamos hacia adelante
+    else:
+        servo.ChangeDutyCycle(7.5)
+        avanzar()
+        #Empieza a contar cada vez que el infrarrojo no reciva un (1 o HIGH)
+    if GPIO.input(SinfraD) == GPIO.LOW:
+            print("Línea detectada")
+            contador += 1
+    #Si llega a dar el valor deseado que requiere el contador, detiene el programa
+    if contador >= 4:
+        print("Se han detectado 4 líneas. Deteniendo el programa.")
+        break
+# Limpiamos los pines GPIO al finalizar el programa
+except KeyboardInterrupt:
+    pass
+
+finally:
+    servo.stop()
+    GPIO.cleanup()
+    cv2.destroyAllWindows()

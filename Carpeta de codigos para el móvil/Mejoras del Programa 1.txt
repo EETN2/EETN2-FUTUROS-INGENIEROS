@@ -1,0 +1,234 @@
+#Importación de las bibliotecas
+import cv2
+import numpy as np
+import RPi.GPIO as GPIO
+import time
+#Tolerancia al detectar los colores
+center_tolerance = 50
+escale_factor = 0.5
+#Declaración de pines
+cap = cv2.VideoCapture(0)
+#Pines para los servomotores
+servo_pin = 7
+servo_pin2 = 8
+#Pin para infrarrojo
+SinfraD = 11
+#Pines para sensores ultrasonicos
+#Sensor Izquierdo
+SechoI = 21
+StrigI = 19
+#Sensor Derecho
+SechoD = 18 
+StrigD = 16
+#Sensor Frontal
+StrigF =15
+SechoF =13
+
+# Configurar los pines GPIO
+GPIO.setmode(GPIO.BOARD)
+GPIO.setup(35, GPIO.OUT)#motor Avanza
+GPIO.setup(36, GPIO.OUT)#motor Retrocede
+GPIO.setup(37, GPIO.OUT)#motor Avanza
+GPIO.setup(38, GPIO.OUT)#motor Retrocede
+GPIO.setup(12, GPIO.OUT)#Alimetacion positiva para el sensor infrarrojo
+GPIO.setup(servo_pin, GPIO.OUT)
+GPIO.setup(servo_pin2, GPIO.OUT)
+GPIO.setup(SinfraD, GPIO.IN)
+GPIO.setup(SechoD, GPIO.IN)
+GPIO.setup(SechoI, GPIO.IN)
+GPIO.setup(StrigI, GPIO.OUT)
+GPIO.setup(StrigD, GPIO.OUT)
+GPIO.setup(SechoF, GPIO.IN)
+GPIO.setup(StrigF, GPIO.OUT)
+#Contador para infrarrojo
+contador = 0
+# Configuramos el servo
+servo = GPIO.PWM(servo_pin, 50)
+servo.start(7.5)  # Ángulo neutro
+# Configuramos velocidad de motores
+pin1 = GPIO.PWM(35, 100)
+pin2 = GPIO.PWM(36, 100)
+pin3 = GPIO.PWM(37, 100)
+pin4 = GPIO.PWM(38, 100)
+pin1.start(0)
+pin2.start(0)
+pin3.start(0)
+pin4.start(0)
+#Color a detectar
+verde_bajo = np.array([40, 40, 40])
+verde_alto = np.array(68, 214, 44[])
+rojo_bajo = np.array([0, 100, 100])
+rojo_alto = np.array([238, 39, 55])
+# Funciones para el auto
+def avanzar():
+    pin1.ChangeDutyCycle(50)
+    pin2.ChangeDutyCycle(0)
+    pin3.ChangeDutyCycle(50)
+    pin4.ChangeDutyCycle(0)
+
+def retroceder():
+    pin1.ChangeDutyCycle(0)
+    pin2.ChangeDutyCycle(50)
+    pin3.ChangeDutyCycle(0)
+    pin4.ChangeDutyCycle(50)
+    
+def izquierda():
+    servo.ChangeDutyCycle(9) 
+    time.sleep(0.1)
+        
+def derecha():
+    servo.ChangeDutyCycle(6)
+    time.sleep(0.1) 
+    
+def detener():
+    pin1.ChangeDutyCycle(0)
+    pin2.ChangeDutyCycle(0)
+    pin3.ChangeDutyCycle(0)
+    pin4.ChangeDutyCycle(0)
+    
+#Función para detectar paredes
+def distancia(pin_trigger, pin_echo):
+    # Generamos un pulso en el pin trigger del sensor ultrasónico
+    GPIO.output(pin_trigger, GPIO.HIGH)
+    time.sleep(0.00001)
+    GPIO.output(pin_trigger, GPIO.LOW)
+    # Medimos el tiempo que tarda en llegar el eco del pulso al pin echo del sensor ultrasónico
+    while GPIO.input(pin_echo) == 0:
+        start_time = time.time()
+    while GPIO.input(pin_echo) == 1:
+        end_time = time.time()
+    # Calculamos la distancia en centímetros utilizando la fórmula de la velocidad del sonido
+    distance = (end_time - start_time) * 34300 / 2
+    return distance
+
+def primera_distancia(contour, frame_width):
+    # Calcular el centro del contorno
+    Motores = cv2.moments(contour)
+    if Motores["m00"] != 0:
+        cx = int(Motores["m10"] / Motores["m00"])
+        return abs(cx - frame_width / 2)
+    else:
+        return float('inf')
+    
+def medir():
+    Motores = cv2.moments(contour)
+    if Motores["m00"] != 0:
+        cx = int(Motores["m10"] / Motores["m00"])
+        angle = (cx / 640.0) * 180
+        angle_offset = 180
+        angle_servo = angle_offset + escale_factor * (angle - angle_offset)  
+        servo.ChangeDutyCycle(7.5 - (angle_servo - 90) /18)
+
+try:
+    while True:
+        avanzar()
+        #Damos HIGH para la alimentacion del infrarrojo, aviso solo porque no teniamos alimentacion para el sensor.
+        GPIO.output(12, GPIO.HIGH)
+        #Definimos los pines ultrasonicos
+        sensor_izquierdo = distancia(StrigI, SechoI)
+        sensor_derecho = distancia(StrigD, SechoD)
+        sensor_frontal = distancia(StrigF, SechoF)
+        #Configurando para la lectura de la camara
+        ret, frame = cap.read()
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        # Crear máscaras para los colores azul y verde
+        mask_rojo = cv2.inRange(hsv, rojo_bajo, rojo_alto)
+        mask_verde = cv2.inRange(hsv, verde_bajo, verde_alto)
+        #Nos calcula en que lugar se encuentra el color
+        lectura_verde = None
+        distancia_verde = float('inf')
+        lectura_rojo = None
+        distancia_rojo = float('inf')
+        contorno_rojo, _ = cv2.findContours(mask_rojo, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contorno_verde, _ = cv2.findContours(mask_verde, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        #Nos crea un contorno para ambos colores
+        for contour in contorno_rojo:
+            x, y, w, h = cv2.boundingRect(contour)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            distance = primera_distancia(contour, frame.shape[1])
+            if distance < distancia_rojo:
+                distancia_rojo = distance
+                lectura_rojo = contour
+
+        for contour in contorno_verde:
+            x, y, w, h = cv2.boundingRect(contour)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            distance = primera_distancia(contour, frame.shape[1])
+            if distance < distancia_verde:
+                distancia_verde = distance
+                lectura_verde = contour
+
+        #Cuando el sensor frontal sense dependiendo del color detectado
+        #El vehiculo girara, (verde-izquierda) o (rojo-derecha)
+        #Si detecta rojo primero, calcula a donde deve dirigirse
+        if distancia_rojo < distancia_verde:
+            if lectura_rojo is not None:
+                medir() # Ajusta el ángulo para seguir el rojo
+                #Si el sensor Frontal sensa, gira a la derecha
+                if sensor_frontal < 9:
+                    servo.ChangeDutyCycle(6)
+                    time.sleep(1) 
+                    servo.ChangeDutyCycle(7) 
+                    time.sleep(1)
+                    servo.ChangeDutyCycle(7.5) 
+                    time.sleep(0.1)
+        else:
+            if lectura_verde is not None:
+                medir()  # Ajusta el ángulo para seguir el verde
+                #Si el sensor Frontal sensa, gira a la izquierda
+                if sensor_frontal < 9:
+                    servo.ChangeDutyCycle(9)
+                    time.sleep(1) 
+                    servo.ChangeDutyCycle(8) 
+                    time.sleep(1)
+                    servo.ChangeDutyCycle(7.5) 
+                    time.sleep(0.1)
+        #Si el sensor Frontal sensa
+        if sensor_frontal < 10:
+            retroceder()
+            #Se retrocede por 1.5 segundos
+            time.sleep(1.5)
+            detener()
+            #Se detiene por 1 segundos
+            time.sleep(1)
+            #Espera hasta que un sensor resiva un pulso
+            if sensor_izquierdo < 35:
+                avanzar()
+                servo.ChangeDutyCycle(6.5)
+                time.sleep(2)
+            elif sensor_derecho < 35:
+                avanzar()
+                servo.ChangeDutyCycle(8.5)
+                time.sleep(2)
+        #Si el sensor izquierdo es menor a 35cm gira a la derecha
+        if sensor_izquierdo < 35:
+            derecha()
+        #Si o no el sesor derecho es menor a 35cm gira a la izquirda
+        elif sensor_derecho < 35:
+            izquierda()
+        #Si no ricive ninguno de los sensores algun pulso avanza
+        else:
+            servo.ChangeDutyCycle(9)
+            avanzar()
+        # Mostrar el fotograma con el objeto seguido
+        cv2.imshow('Color Tracking', frame)
+        #Empieza a contar cada vez que el infrarrojo no reciva un (1 o HIGH)
+        if GPIO.input(SinfraD) == GPIO.LOW:
+            print("Línea detectada")
+            contador += 1
+        #Si llega a dar el valor deseado que requiere el contador, detiene el programa
+        if contador >= 4:
+            print("Se han detectado 4 líneas. Deteniendo el programa.")
+            break
+        #Tambien se puede cancelar el programa presionando "q"
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+except KeyboardInterrupt:
+    pass
+
+finally:
+    cap.release()
+    servo.stop()
+    GPIO.cleanup()
+    cv2.destroyAllWindows()
